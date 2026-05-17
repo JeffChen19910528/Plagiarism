@@ -11,9 +11,9 @@ A plagiarism detection tool designed for graduate students. Upload your thesis (
 
 | Feature | Description |
 |---------|-------------|
-| 📄 Document Parsing | Supports PDF and Word (.docx/.doc) |
-| 🔎 Multi-source Search | Semantic Scholar, arXiv, CrossRef, Taiwan NDLTD, Google Scholar |
-| 📚 Database Coverage | IEEE, ACM, Springer, Elsevier, Nature, arXiv, Taiwan theses — 200M+ papers |
+| 📄 Smart Document Parsing | Three-tier PDF parsing: GROBID ML → font-size layout → Regex; handles all major conference/journal formats |
+| 🔎 Multi-source Search | Semantic Scholar, arXiv, CrossRef, Taiwan NDLTD, Google Scholar, Springer |
+| 📚 Database Coverage | IEEE, ACM, Springer journals & books, Elsevier, Nature, arXiv, Taiwan theses — 200M+ papers |
 | 📊 Similarity Analysis | TF-IDF cosine + N-gram fingerprint + keyword overlap (3-layer) |
 | 🔬 Paragraph Matching | Winnowing algorithm for segment-level matching with side-by-side display |
 | 🎯 Risk Levels | High (≥60%), Medium (≥35%), Low (<35%) |
@@ -44,7 +44,8 @@ Plagiarism/
 │       ├── arxiv_searcher.py     # arXiv Atom API
 │       ├── crossref_searcher.py  # CrossRef REST API
 │       ├── ndltd_searcher.py     # Taiwan NDLTD (web scraping)
-│       └── google_scholar.py     # Google Scholar (scholarly library)
+│       ├── google_scholar.py     # Google Scholar (scholarly library)
+│       └── springer_searcher.py  # Springer journals & books (API or CrossRef fallback)
 └── README.md / README_EN.md / README_JA.md
 ```
 
@@ -95,7 +96,8 @@ Click "Upload Paper File" and select your PDF or Word file.
 | Search Sources | Check databases to compare against (all checked by default) |
 | Result Limits | Number of papers to retrieve per source |
 | Similarity Threshold | Hide results below this % (default: 10%) |
-| API Key | Enter Semantic Scholar API Key to increase rate limits (optional) |
+| Semantic Scholar API Key | Increases rate limits (optional) |
+| Springer Nature API Key | Enables direct Springer API queries; falls back to CrossRef without a key (optional) |
 
 ### Step 3: Start comparison
 Click **🚀 Start Comparison**. The progress bar updates in real time for each result retrieved, showing current source and overall percentage.
@@ -158,6 +160,12 @@ All UI elements (sidebar, buttons, result labels, CSV column headers) update ins
 - **Cost**: Free (via `scholarly` library)
 - **Note**: Google rate-limits scraping; if blocked, wait a few minutes or uncheck this source
 
+### Springer (Journals + Books)
+- **Covers**: Springer Nature journal articles and book chapters
+- **Cost**: Free — without an API key, queries fall back to CrossRef filtered to the Springer DOI prefix `10.1007`
+- **API Key (optional)**: Register free at https://dev.springernature.com/ to query the Springer Metadata API directly for richer results
+- **Result labels**: Each result's Source field shows `Springer Journal` or `Springer Book`
+
 ---
 
 ## ⚠️ Risk Levels
@@ -177,16 +185,27 @@ All UI elements (sidebar, buttons, result labels, CSV column headers) update ins
 ```
 User uploads PDF/DOCX
         ↓
-   Text extraction (pdfplumber / python-docx)
+   ┌──────────────────────────────────────────────────────┐
+   │  Three-tier PDF structure parsing (auto-degradation)  │
+   │  ① GROBID API (ML — handles all major formats)        │
+   │     → Returns TEI XML; extracts title/abstract/body   │
+   │  ② pdfplumber font-size analysis (if GROBID fails)    │
+   │     → Detects two-column layout; extracts each column │
+   │       separately; joins end-of-line hyphenation       │
+   │     → Largest font (excl. drop caps) = title          │
+   │  ③ Regex heuristics (DOCX or both layers failed)      │
+   │     → Detects IEEE inline "Abstract—" and skips       │
+   │       journal headers / author-line artefacts         │
+   └──────────────────────────────────────────────────────┘
         ↓
-   Structure analysis (title / abstract / keywords / body)
+   Structured data (title / abstract / keywords / body)
         ↓
    Build search query string
         ↓
    ┌────────────────────────────────────────────────────┐
-   │  Search 5 academic databases                        │
+   │  Search 6 academic databases                        │
    │  Semantic Scholar / arXiv / CrossRef               │
-   │  Taiwan NDLTD / Google Scholar                     │
+   │  Taiwan NDLTD / Google Scholar / Springer          │
    └────────────────────────────────────────────────────┘
         ↓ (per-result live progress bar)
    ┌────────────────────────────────────────────────────┐
@@ -207,10 +226,28 @@ User uploads PDF/DOCX
 
 ## 🔧 Advanced Configuration
 
+### PDF Parsing Tiers
+
+| Tier | When used | Advantage |
+|------|-----------|-----------|
+| 🤖 GROBID | Default (auto on PDF upload) | ML-based; handles IEEE / ACM / Springer / Nature / arXiv and more without any configuration |
+| 📐 Font-size + layout analysis | GROBID timeout or failure | Runs locally; uses x0-start band density to find the column gutter; extracts left and right columns with `within_bbox`; uses gutter-crossing detection to separate the full-width header (title/authors) from the two-column body; applies 9 pt edge padding so column-edge characters aren't clipped; skips drop caps and running page headers via font-size tiers |
+| 🔤 Regex | DOCX or both upper tiers failed | Handles IEEE inline `Abstract—` and detects author-line artefacts |
+
+**Two-column formats tested**: IEEE Transactions (two-column, abstract in columns), ACM SIGCONF-style federated-learning paper — both extract correctly with proper column order and no word merging.
+
+> **GROBID latency note**: Uses the public Hugging Face Space. Cold-start on the first call can take 10–30 s; subsequent calls typically take 3–5 s. To use a self-hosted instance, change `_GROBID_URL` in `document_parser.py`.
+
 ### Get a Semantic Scholar API Key
 1. Go to https://www.semanticscholar.org/product/api
 2. Click "Get API Key" and fill in the form
 3. Free plan: 1 req/sec; with key: 10 req/sec
+
+### Get a Springer Nature API Key
+1. Register free at https://dev.springernature.com/
+2. Create an application to obtain your API key
+3. Enter it in the sidebar "Springer Nature API Key" field to query Springer Metadata API directly
+4. Without a key, the tool automatically falls back to CrossRef (results still returned, but slightly fewer)
 
 ### Customize Risk Thresholds
 In `src/similarity.py`, edit the `risk_level` property:
@@ -256,7 +293,7 @@ Recommended:
 | pdfplumber | PDF text extraction |
 | python-docx | Word document parsing |
 | scikit-learn | TF-IDF similarity |
-| requests | HTTP API calls |
+| requests | HTTP API calls (incl. Springer / CrossRef) |
 | pandas | Data handling & CSV export |
 | jieba | Chinese tokenization (fallback) |
 | beautifulsoup4 + lxml | NDLTD HTML parsing |

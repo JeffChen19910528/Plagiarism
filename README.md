@@ -11,9 +11,9 @@
 
 | 功能 | 說明 |
 |------|------|
-| 📄 文件解析 | 支援 PDF 與 Word (.docx/.doc) 格式 |
-| 🔎 多來源搜尋 | Semantic Scholar、arXiv、CrossRef、碩博士論文網、Google Scholar |
-| 📚 資料庫涵蓋 | IEEE、ACM、Springer、Elsevier、Nature、arXiv、台灣碩博士論文等 200M+ 篇 |
+| 📄 智慧文件解析 | PDF 三層解析：GROBID ML → 字型大小分析 → Regex；支援所有主流會議格式 |
+| 🔎 多來源搜尋 | Semantic Scholar、arXiv、CrossRef、碩博士論文網、Google Scholar、Springer |
+| 📚 資料庫涵蓋 | IEEE、ACM、Springer 期刊與書籍、Elsevier、Nature、arXiv、台灣碩博士論文等 200M+ 篇 |
 | 📊 相似度計算 | TF-IDF 餘弦相似度 + N-gram 指紋比對 + 關鍵字重疊三層分析 |
 | 🔬 段落比對 | Winnowing 演算法逐段比對，標示哪幾段與對方論文吻合 |
 | 🎯 風險分級 | 高風險（≥60%）、中風險（≥35%）、低風險（<35%） |
@@ -45,7 +45,9 @@ Plagiarism/
 │       ├── arxiv_searcher.py     # arXiv Atom API
 │       ├── crossref_searcher.py  # CrossRef REST API
 │       ├── ndltd_searcher.py     # 台灣碩博士論文網（爬蟲）
-│       └── google_scholar.py     # Google Scholar（scholarly 套件）
+│       ├── google_scholar.py     # Google Scholar（scholarly 套件）
+│       └── springer_searcher.py  # Springer 期刊與書籍（API 或 CrossRef fallback）
+└── README.md / README_EN.md / README_JA.md
 └── README.md
 ```
 
@@ -98,10 +100,12 @@ streamlit run app.py
 
 | 設定項目 | 說明 |
 |----------|------|
+| 解析方式 | 畫面頂部顯示目前使用的解析器（GROBID／字型分析／Regex） |
 | 搜尋來源 | 勾選要比對的資料庫（預設全勾） |
 | 搜尋數量 | 每個來源抓取的論文筆數 |
 | 相似度門檻 | 低於此值的結果不顯示（預設 10%） |
-| API Key | 填入 Semantic Scholar API Key 可提高速率上限（選填） |
+| Semantic Scholar API Key | 填入可提高速率上限（選填） |
+| Springer Nature API Key | 填入可直接查詢 Springer API；無 key 時自動透過 CrossRef 查詢（選填） |
 
 ### Step 3：開始比對
 
@@ -159,6 +163,13 @@ streamlit run app.py
 - **費用**：免費（透過 `scholarly` 套件模擬瀏覽器存取）
 - **注意**：Google 有速率限制，搜尋過於頻繁時會暫時被封鎖；遇到此情況請稍等幾分鐘後再試，或取消勾選此來源
 
+### Springer（期刊 + 書籍）
+
+- **涵蓋**：Springer Nature 期刊文章（Journal Articles）與書籍章節（Book Chapters）
+- **費用**：免費（無 API Key 時透過 CrossRef 過濾 Springer DOI 前綴 `10.1007`）
+- **API Key（選填）**：可於 https://dev.springernature.com/ 免費申請，填入後直接查 Springer Metadata API，結果更完整
+- **結果標籤**：各論文來源欄位會標示 `Springer Journal` 或 `Springer Book`
+
 ---
 
 ## ⚠️ 風險等級說明
@@ -178,16 +189,25 @@ streamlit run app.py
 ```
 使用者上傳 PDF/DOCX
         ↓
-   文字擷取（pdfplumber / python-docx）
+   ┌──────────────────────────────────────────────────────┐
+   │  三層 PDF 結構解析（自動降級）                          │
+   │  ① GROBID API（ML，辨識所有主流會議/期刊格式）          │
+   │     → 回傳 TEI XML，精確擷取標題/作者/摘要/正文          │
+   │  ② pdfplumber 字型大小分析（GROBID 失敗時）             │
+   │     → 偵測兩欄版型並分欄萃取；修復斷字接續               │
+   │     → 最大字體（排除 Drop Cap）= 標題；排除頁首 header   │
+   │  ③ 正規表示式啟發法（DOCX 或前兩層失敗時）               │
+   │     → 偵測 IEEE inline "Abstract—" 等格式              │
+   └──────────────────────────────────────────────────────┘
         ↓
-   結構分析（題目 / 摘要 / 關鍵字 / 正文）
+   結構資料（題目 / 摘要 / 關鍵字 / 正文）
         ↓
    建構搜尋查詢字串
         ↓
    ┌────────────────────────────────────────────────────┐
-   │  搜尋學術資料庫（5 個來源）                         │
+   │  搜尋學術資料庫（6 個來源）                          │
    │  Semantic Scholar / arXiv / CrossRef               │
-   │  台灣碩博士論文網 / Google Scholar                  │
+   │  台灣碩博士論文網 / Google Scholar / Springer       │
    └────────────────────────────────────────────────────┘
         ↓
    ┌────────────────────────────────────────────────────┐
@@ -208,11 +228,30 @@ streamlit run app.py
 
 ## 🔧 進階設定
 
+### PDF 解析層說明
+
+| 解析層 | 使用時機 | 優點 |
+|--------|---------|------|
+| 🤖 GROBID | 預設（PDF 上傳時自動呼叫） | 支援所有主流格式（IEEE / ACM / Springer / Nature / arXiv 等），不需手動設定 |
+| 📐 字型大小 + 版型分析 | GROBID 逾時或失敗 | 純本機執行；以 x0-start 帶狀密度偵測欄間距；用 `within_bbox` 分欄萃取左右欄；利用跨槽字詞偵測自動分離全版標題區（標題／作者）與雙欄內文；加 9 pt 邊緣補正防止欄邊字元被截斷；依字體大小跳過 Drop Cap 與頁首 |
+| 🔤 Regex | DOCX 或前兩層均失敗 | 處理 IEEE inline `Abstract—` 等常見格式，搭配作者行偵測避免誤判 |
+
+**已驗證的雙欄格式**：IEEE Transactions（雙欄、摘要在欄中）、ACM SIGCONF 風格論文（聯邦學習）——兩者均能正確分欄萃取，不再有文字交錯或詞語合併問題。
+
+> **GROBID 延遲說明**：使用 Hugging Face 公開空間，冷啟動時首次呼叫約需 10–30 秒；後續請求通常在 3–5 秒內完成。如需更快速度，可自行架設 GROBID Docker 並修改 `document_parser.py` 的 `_GROBID_URL`。
+
 ### 取得 Semantic Scholar API Key
 
 1. 前往 https://www.semanticscholar.org/product/api
 2. 點選「Get API Key」填寫申請表
 3. 免費方案每秒 1 次請求，有 Key 可提升至每秒 10 次
+
+### 取得 Springer Nature API Key
+
+1. 前往 https://dev.springernature.com/ 免費註冊
+2. 建立 Application 並取得 API Key
+3. 填入側邊欄「Springer Nature API Key」欄位即可直接查詢 Springer Metadata API
+4. 未填 Key 時系統自動 fallback 至 CrossRef（仍可取得結果，但資料量略少）
 
 ### 自訂風險門檻
 
@@ -275,7 +314,7 @@ WIN_SIZE = 4    # Winnowing 視窗大小
 | pdfplumber | PDF 文字擷取 |
 | python-docx | Word 文件解析 |
 | scikit-learn | TF-IDF 相似度計算 |
-| requests | HTTP API 呼叫 |
+| requests | HTTP API 呼叫（含 Springer / CrossRef） |
 | pandas | 資料整理與 CSV 匯出 |
 | jieba | 中文斷詞（備用） |
 | beautifulsoup4 + lxml | NDLTD 碩博士論文網 HTML 解析 |

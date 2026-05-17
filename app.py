@@ -3,22 +3,17 @@
 import pandas as pd
 import streamlit as st
 
-from src.document_parser import parse_uploaded_file
+from src.document_parser import parse_paper_structured
 from src.i18n import LANG_OPTIONS, t
 from src.similarity import SimilarityResult, build_similarity_result, rank_results
-from src.text_processor import (
-    build_search_query,
-    extract_abstract,
-    extract_body,
-    extract_keywords,
-    extract_title,
-)
+from src.text_processor import build_search_query
 from src.searchers import (
     arxiv_searcher,
     crossref_searcher,
     google_scholar,
     ndltd_searcher,
     semantic_scholar,
+    springer_searcher,
 )
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -184,6 +179,10 @@ with st.sidebar:
         t("src_gscholar", lang), value=True,
         help=t("src_gscholar_help", lang),
     )
+    use_springer = st.checkbox(
+        t("src_springer", lang), value=True,
+        help=t("src_springer_help", lang),
+    )
 
     st.subheader(t("sidebar_limits", lang))
     semantic_limit = st.slider(t("limit_semantic", lang), 5, 50, 20)
@@ -191,6 +190,7 @@ with st.sidebar:
     crossref_limit = st.slider(t("limit_crossref", lang), 5, 20, 10)
     ndltd_limit    = st.slider(t("limit_ndltd",    lang), 5, 20, 10)
     gscholar_limit = st.slider(t("limit_gscholar", lang), 5, 20, 10)
+    springer_limit = st.slider(t("limit_springer", lang), 5, 20, 10)
 
     st.subheader(t("sidebar_threshold", lang))
     threshold = st.slider(t("threshold_label", lang), 0, 100, 10)
@@ -201,6 +201,11 @@ with st.sidebar:
         t("apikey_label", lang),
         type="password",
         help=t("apikey_help", lang),
+    )
+    springer_api_key = st.text_input(
+        t("apikey_springer_label", lang),
+        type="password",
+        help=t("apikey_springer_help", lang),
     )
 
     st.markdown("---")
@@ -230,25 +235,36 @@ if not uploaded_file:
 
 with st.spinner(t("spinner_parse", lang)):
     try:
-        raw_text = parse_uploaded_file(uploaded_file)
+        parsed = parse_paper_structured(uploaded_file)
     except Exception as e:
         st.error(t("err_parse", lang) + str(e))
         st.stop()
+
+raw_text     = parsed["raw_text"]
+title        = parsed["title"]
+abstract     = parsed["abstract"]
+keywords     = parsed["keywords"]
+body         = parsed["body"]
+parse_source = parsed["parse_source"]
 
 if len(raw_text.strip()) < 100:
     st.error(t("err_short", lang))
     st.stop()
 
-title       = extract_title(raw_text)
-abstract    = extract_abstract(raw_text)
-keywords    = extract_keywords(raw_text)
-body        = extract_body(raw_text)
 source_text = f"{title} {abstract} {body}"
 query       = build_search_query(title, keywords, abstract)
 
 # ── Show parsed info ───────────────────────────────────────────────────────────
 
 with st.expander(t("expander_parsed", lang), expanded=True):
+    _source_badge = {
+        "GROBID":  ("🤖", t("parse_src_grobid",  lang)),
+        "Layout":  ("📐", t("parse_src_layout",  lang)),
+        "Regex":   ("🔤", t("parse_src_regex",   lang)),
+    }.get(parse_source, ("🔤", parse_source))
+    st.caption(
+        f"{t('parse_src_label', lang)} {_source_badge[0]} **{_source_badge[1]}**"
+    )
     c1, c2 = st.columns([3, 1])
     with c1:
         st.markdown(f"{t('label_title',    lang)} {title}")
@@ -272,6 +288,7 @@ total_limit = sum([
     crossref_limit if use_crossref else 0,
     ndltd_limit    if use_ndltd    else 0,
     gscholar_limit if use_gscholar else 0,
+    springer_limit if use_springer else 0,
 ])
 
 if total_limit == 0:
@@ -333,6 +350,16 @@ if use_gscholar:
         )
     except Exception as e:
         st.warning(t("warn_gscholar", lang) + str(e))
+
+if use_springer:
+    status_holder.info(t("status_springer", lang))
+    try:
+        _run_search(
+            springer_searcher.search(query, max_results=springer_limit, api_key=springer_api_key),
+            "Springer", springer_limit, source_text, keywords, results, ps, lang,
+        )
+    except Exception as e:
+        st.warning(t("warn_springer", lang) + str(e))
 
 progress_bar.progress(1.0, text="100%")
 status_holder.empty()

@@ -11,9 +11,9 @@
 
 | 機能 | 説明 |
 |------|------|
-| 📄 ドキュメント解析 | PDF および Word（.docx/.doc）に対応 |
-| 🔎 マルチソース検索 | Semantic Scholar、arXiv、CrossRef、台湾 NDLTD、Google Scholar |
-| 📚 データベース範囲 | IEEE、ACM、Springer、Elsevier、Nature、arXiv、台湾学位論文 — 2 億件以上 |
+| 📄 スマートドキュメント解析 | PDF 3 層解析：GROBID ML → フォントサイズ解析 → Regex。主要な会議・学術誌フォーマット全対応 |
+| 🔎 マルチソース検索 | Semantic Scholar、arXiv、CrossRef、台湾 NDLTD、Google Scholar、Springer |
+| 📚 データベース範囲 | IEEE、ACM、Springer 学術誌・書籍、Elsevier、Nature、arXiv、台湾学位論文 — 2 億件以上 |
 | 📊 類似度分析 | TF-IDF コサイン + N-gram フィンガープリント + キーワード重複（3 層） |
 | 🔬 段落照合 | Winnowing アルゴリズムで段落単位の照合・並排表示 |
 | 🎯 リスク分類 | 高（≥60%）・中（≥35%）・低（<35%） |
@@ -44,7 +44,8 @@ Plagiarism/
 │       ├── arxiv_searcher.py     # arXiv Atom API
 │       ├── crossref_searcher.py  # CrossRef REST API
 │       ├── ndltd_searcher.py     # 台湾 NDLTD（スクレイピング）
-│       └── google_scholar.py     # Google Scholar（scholarly ライブラリ）
+│       ├── google_scholar.py     # Google Scholar（scholarly ライブラリ）
+│       └── springer_searcher.py  # Springer 学術誌・書籍（API または CrossRef フォールバック）
 └── README.md / README_EN.md / README_JA.md
 ```
 
@@ -95,7 +96,8 @@ streamlit run app.py
 | 検索ソース | 比較対象のデータベースを選択（デフォルト：全選択） |
 | 取得件数 | 各ソースから取得する件数 |
 | 類似度しきい値 | この値未満の結果を非表示（デフォルト：10%） |
-| API キー | Semantic Scholar の API キーを入力すると制限が緩和（任意） |
+| Semantic Scholar API キー | 入力するとレート制限が緩和（任意） |
+| Springer Nature API キー | Springer API を直接利用可能に。なければ CrossRef にフォールバック（任意） |
 
 ### Step 3：比較開始
 **🚀 比較開始** ボタンをクリックします。進捗バーは結果を取得するたびにリアルタイム更新され、現在の検索ソースと全体の進捗率が表示されます。
@@ -158,6 +160,12 @@ streamlit run app.py
 - **費用**：無料（`scholarly` ライブラリ経由）
 - **注意**：Google のレート制限によりブロックされる場合があります。数分待つか、このソースのチェックを外してください
 
+### Springer（学術誌 + 書籍）
+- **対象**：Springer Nature の学術誌論文（Journal Article）および書籍章（Book Chapter）
+- **費用**：無料 — API キーなしの場合、Springer DOI プレフィックス `10.1007` で CrossRef にフォールバック
+- **API キー（任意）**：https://dev.springernature.com/ で無料登録し、Springer Metadata API を直接利用すると結果がより充実
+- **結果ラベル**：ソース欄に `Springer Journal` または `Springer Book` と表示
+
 ---
 
 ## ⚠️ リスクレベルの説明
@@ -177,16 +185,25 @@ streamlit run app.py
 ```
 ユーザーが PDF/DOCX をアップロード
         ↓
-   テキスト抽出（pdfplumber / python-docx）
+   ┌──────────────────────────────────────────────────────┐
+   │  3 層 PDF 構造解析（自動フォールバック）                 │
+   │  ① GROBID API（ML — 主要な全フォーマット対応）           │
+   │     → TEI XML を返し、タイトル・要旨・本文を正確抽出      │
+   │  ② pdfplumber フォントサイズ解析（GROBID 失敗時）        │
+   │     → 2 段組を検出し各カラムを個別抽出；ハイフン修復     │
+   │     → 最大フォント（ドロップキャップ除外）= タイトル     │
+   │  ③ 正規表現（DOCX または上位 2 層が失敗した場合）         │
+   │     → IEEE inline "Abstract—" 等の形式を検出            │
+   └──────────────────────────────────────────────────────┘
         ↓
-   構造解析（タイトル / 要旨 / キーワード / 本文）
+   構造化データ（タイトル / 要旨 / キーワード / 本文）
         ↓
    検索クエリの構築
         ↓
    ┌────────────────────────────────────────────────────┐
-   │  5 つの学術データベースを検索                        │
+   │  6 つの学術データベースを検索                        │
    │  Semantic Scholar / arXiv / CrossRef               │
-   │  台湾 NDLTD / Google Scholar                       │
+   │  台湾 NDLTD / Google Scholar / Springer            │
    └────────────────────────────────────────────────────┘
         ↓（取得ごとにリアルタイム進捗バー更新）
    ┌────────────────────────────────────────────────────┐
@@ -207,10 +224,28 @@ streamlit run app.py
 
 ## 🔧 詳細設定
 
+### PDF 解析層の説明
+
+| 解析層 | 使用タイミング | 利点 |
+|--------|-------------|------|
+| 🤖 GROBID | デフォルト（PDF アップロード時に自動呼び出し） | ML ベース。IEEE / ACM / Springer / Nature / arXiv など全主要フォーマットを設定不要で対応 |
+| 📐 フォントサイズ＋レイアウト解析 | GROBID タイムアウト・失敗時 | ローカル実行。x0-start 帯状密度でカラム溝を検出し `within_bbox` で左右カラムを個別抽出；溝越えワード検出で全幅ヘッダー（タイトル／著者）と2段組本文を自動分離；9 pt エッジパディングでカラム端文字の切り捨てを防止；ドロップキャップとページヘッダーを除外 |
+| 🔤 正規表現 | DOCX または上位 2 層が両方失敗した場合 | IEEE inline `Abstract—` 形式の検出と著者行アーティファクトの除外 |
+
+**検証済み2段組フォーマット**：IEEE Transactions（2段組・摘要も段組内）、ACM SIGCONF スタイル論文（連合学習）——どちらも正しい段組順序で抽出でき、文字の混在や単語の結合は発生しません。
+
+> **GROBID の遅延について**：Hugging Face の公開スペースを使用しています。コールドスタート時の初回呼び出しは 10〜30 秒かかることがあります。自前で Docker ホストする場合は `document_parser.py` の `_GROBID_URL` を変更してください。
+
 ### Semantic Scholar API キーの取得
 1. https://www.semanticscholar.org/product/api にアクセス
 2. "Get API Key" をクリックしてフォームを記入
 3. 無料プラン：1 リクエスト/秒 → キーあり：10 リクエスト/秒
+
+### Springer Nature API キーの取得
+1. https://dev.springernature.com/ で無料ユーザー登録
+2. アプリケーションを作成して API キーを取得
+3. サイドバーの「Springer Nature API キー」欄に入力すると Springer Metadata API を直接利用可能
+4. キーなしの場合は CrossRef に自動フォールバック（結果は取得できますが件数は若干少なくなります）
 
 ### リスクしきい値のカスタマイズ
 `src/similarity.py` の `risk_level` プロパティを編集：
@@ -256,7 +291,7 @@ WIN_SIZE = 4    # Winnowing ウィンドウサイズ
 | pdfplumber | PDF テキスト抽出 |
 | python-docx | Word ドキュメント解析 |
 | scikit-learn | TF-IDF 類似度計算 |
-| requests | HTTP API 呼び出し |
+| requests | HTTP API 呼び出し（Springer / CrossRef 含む） |
 | pandas | データ処理・CSV エクスポート |
 | jieba | 中国語トークナイザー（フォールバック） |
 | beautifulsoup4 + lxml | NDLTD HTML 解析 |
