@@ -6,15 +6,8 @@ import streamlit as st
 from src.document_parser import parse_paper_structured
 from src.i18n import LANG_OPTIONS, t
 from src.similarity import SimilarityResult, build_similarity_result, rank_results
+from src.sources import SOURCE_CONFIGS
 from src.text_processor import build_search_query
-from src.searchers import (
-    arxiv_searcher,
-    crossref_searcher,
-    google_scholar,
-    ndltd_searcher,
-    semantic_scholar,
-    springer_searcher,
-)
 
 # ── Page config ────────────────────────────────────────────────────────────────
 
@@ -50,14 +43,13 @@ lang = st.session_state["lang"]
 
 # ── Helper functions ───────────────────────────────────────────────────────────
 
+_RISK_CSS_CLASS = {"high": "risk-high", "medium": "risk-medium", "low": "risk-low"}
+
+
 def render_results(results: list, lang: str) -> None:
-    risk_cls_map = {
-        t("risk_high", lang):   "risk-high",
-        t("risk_medium", lang): "risk-medium",
-        t("risk_low", lang):    "risk-low",
-    }
     for i, r in enumerate(results, 1):
-        risk_cls = risk_cls_map.get(r.risk_level, "risk-low")
+        risk_cls = _RISK_CSS_CLASS[r.risk_tier]
+        risk_label = t(f"risk_{r.risk_tier}", lang)
         with st.expander(
             t("expander_result", lang,
               icon=r.risk_color, i=i, title=r.title[:90], score=r.combined_score),
@@ -77,7 +69,7 @@ def render_results(results: list, lang: str) -> None:
                 st.markdown(f"{t('label_source', lang)} `{r.source}`")
                 st.markdown(
                     f"<span class='{risk_cls}'>"
-                    f"{t('label_risk', lang)}{r.risk_level}</span>",
+                    f"{t('label_risk', lang)}{risk_label}</span>",
                     unsafe_allow_html=True,
                 )
                 st.metric(t("metric_combined", lang), f"{r.combined_score:.1f}%")
@@ -171,42 +163,33 @@ with st.sidebar:
     st.title(t("sidebar_title", lang))
 
     st.subheader(t("sidebar_sources", lang))
-    use_semantic = st.checkbox(t("src_semantic", lang), value=True)
-    use_arxiv    = st.checkbox(t("src_arxiv",    lang), value=True)
-    use_crossref = st.checkbox(t("src_crossref", lang), value=True)
-    use_ndltd    = st.checkbox(t("src_ndltd",    lang), value=True)
-    use_gscholar = st.checkbox(
-        t("src_gscholar", lang), value=True,
-        help=t("src_gscholar_help", lang),
-    )
-    use_springer = st.checkbox(
-        t("src_springer", lang), value=True,
-        help=t("src_springer_help", lang),
-    )
+    use_source: dict[str, bool] = {}
+    for cfg in SOURCE_CONFIGS:
+        help_text = t(f"src_{cfg.id}_help", lang) if cfg.has_help else None
+        use_source[cfg.id] = st.checkbox(
+            t(f"src_{cfg.id}", lang), value=True, help=help_text,
+        )
 
     st.subheader(t("sidebar_limits", lang))
-    semantic_limit = st.slider(t("limit_semantic", lang), 5, 50, 20)
-    arxiv_limit    = st.slider(t("limit_arxiv",    lang), 5, 20, 10)
-    crossref_limit = st.slider(t("limit_crossref", lang), 5, 20, 10)
-    ndltd_limit    = st.slider(t("limit_ndltd",    lang), 5, 20, 10)
-    gscholar_limit = st.slider(t("limit_gscholar", lang), 5, 20, 10)
-    springer_limit = st.slider(t("limit_springer", lang), 5, 20, 10)
+    limits: dict[str, int] = {}
+    for cfg in SOURCE_CONFIGS:
+        lo, hi, default = cfg.slider_range
+        limits[cfg.id] = st.slider(t(f"limit_{cfg.id}", lang), lo, hi, default)
 
     st.subheader(t("sidebar_threshold", lang))
     threshold = st.slider(t("threshold_label", lang), 0, 100, 10)
 
     st.markdown("---")
     st.subheader(t("sidebar_apikey", lang))
-    ss_api_key = st.text_input(
-        t("apikey_label", lang),
-        type="password",
-        help=t("apikey_help", lang),
-    )
-    springer_api_key = st.text_input(
-        t("apikey_springer_label", lang),
-        type="password",
-        help=t("apikey_springer_help", lang),
-    )
+    api_keys = {
+        "semantic": st.text_input(
+            t("apikey_label", lang), type="password", help=t("apikey_help", lang),
+        ),
+        "springer": st.text_input(
+            t("apikey_springer_label", lang), type="password",
+            help=t("apikey_springer_help", lang),
+        ),
+    }
 
     st.markdown("---")
     st.caption(t("sidebar_version", lang))
@@ -282,14 +265,8 @@ with st.expander(t("expander_parsed", lang), expanded=True):
 if not st.button(t("btn_start", lang), type="primary", use_container_width=True):
     st.stop()
 
-total_limit = sum([
-    semantic_limit if use_semantic else 0,
-    arxiv_limit    if use_arxiv    else 0,
-    crossref_limit if use_crossref else 0,
-    ndltd_limit    if use_ndltd    else 0,
-    gscholar_limit if use_gscholar else 0,
-    springer_limit if use_springer else 0,
-])
+active_sources = [cfg for cfg in SOURCE_CONFIGS if use_source[cfg.id]]
+total_limit = sum(limits[cfg.id] for cfg in active_sources)
 
 if total_limit == 0:
     st.warning(t("warn_no_source", lang))
@@ -301,65 +278,18 @@ status_holder = st.empty()
 
 ps = {"bar": progress_bar, "done": 0, "total": max(total_limit, 1)}
 
-if use_semantic:
-    status_holder.info(t("status_semantic", lang))
+for cfg in active_sources:
+    status_holder.info(t(f"status_{cfg.id}", lang))
+    search_kwargs = {"max_results": limits[cfg.id]}
+    if cfg.api_key_field:
+        search_kwargs["api_key"] = api_keys[cfg.api_key_field]
     try:
         _run_search(
-            semantic_scholar.search(query, max_results=semantic_limit, api_key=ss_api_key),
-            "Semantic Scholar", semantic_limit, source_text, keywords, results, ps, lang,
+            cfg.search(query, **search_kwargs),
+            cfg.display_name, limits[cfg.id], source_text, keywords, results, ps, lang,
         )
     except Exception as e:
-        st.warning(t("warn_semantic", lang) + str(e))
-
-if use_arxiv:
-    status_holder.info(t("status_arxiv", lang))
-    try:
-        _run_search(
-            arxiv_searcher.search(query, max_results=arxiv_limit),
-            "arXiv", arxiv_limit, source_text, keywords, results, ps, lang,
-        )
-    except Exception as e:
-        st.warning(t("warn_arxiv", lang) + str(e))
-
-if use_crossref:
-    status_holder.info(t("status_crossref", lang))
-    try:
-        _run_search(
-            crossref_searcher.search(query, max_results=crossref_limit),
-            "CrossRef", crossref_limit, source_text, keywords, results, ps, lang,
-        )
-    except Exception as e:
-        st.warning(t("warn_crossref", lang) + str(e))
-
-if use_ndltd:
-    status_holder.info(t("status_ndltd", lang))
-    try:
-        _run_search(
-            ndltd_searcher.search(query, max_results=ndltd_limit),
-            "NDLTD", ndltd_limit, source_text, keywords, results, ps, lang,
-        )
-    except Exception as e:
-        st.warning(t("warn_ndltd", lang) + str(e))
-
-if use_gscholar:
-    status_holder.info(t("status_gscholar", lang))
-    try:
-        _run_search(
-            google_scholar.search(query, max_results=gscholar_limit),
-            "Google Scholar", gscholar_limit, source_text, keywords, results, ps, lang,
-        )
-    except Exception as e:
-        st.warning(t("warn_gscholar", lang) + str(e))
-
-if use_springer:
-    status_holder.info(t("status_springer", lang))
-    try:
-        _run_search(
-            springer_searcher.search(query, max_results=springer_limit, api_key=springer_api_key),
-            "Springer", springer_limit, source_text, keywords, results, ps, lang,
-        )
-    except Exception as e:
-        st.warning(t("warn_springer", lang) + str(e))
+        st.warning(t(f"warn_{cfg.id}", lang) + str(e))
 
 progress_bar.progress(1.0, text="100%")
 status_holder.empty()

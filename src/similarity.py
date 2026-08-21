@@ -27,16 +27,22 @@ class SimilarityResult:
     fingerprint: FingerprintResult = field(default_factory=lambda: FingerprintResult(0.0))
 
     @property
-    def risk_level(self) -> str:
+    def risk_tier(self) -> str:
+        """Language-neutral risk bucket: 'high' | 'medium' | 'low'.
+
+        Callers translate this via i18n (t(f"risk_{risk_tier}", lang)) instead
+        of relying on a hardcoded display string, so the tier stays valid
+        across languages.
+        """
         if self.combined_score >= 60:
-            return "高風險"
+            return "high"
         if self.combined_score >= 35:
-            return "中風險"
-        return "低風險"
+            return "medium"
+        return "low"
 
     @property
     def risk_color(self) -> str:
-        return {"高風險": "🔴", "中風險": "🟡", "低風險": "🟢"}[self.risk_level]
+        return {"high": "🔴", "medium": "🟡", "low": "🟢"}[self.risk_tier]
 
 
 def compute_tfidf_similarity(source_text: str, candidate_text: str) -> float:

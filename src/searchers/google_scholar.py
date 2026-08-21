@@ -4,11 +4,14 @@ import time
 from typing import Generator
 
 
-def search(query: str, max_results: int = 10) -> Generator[dict, None, None]:
+def search(query: str, max_results: int = 10, api_key: str = "") -> Generator[dict, None, None]:
     """Yield paper dicts from Google Scholar.
 
     Note: scholarly scrapes Google Scholar and may be rate-limited.
     If it fails, a warning is printed and the generator returns empty.
+
+    api_key is unused (Google Scholar needs none) but kept so every searcher
+    shares one call signature for src/sources.py's uniform dispatch.
     """
     try:
         from scholarly import scholarly as _scholarly

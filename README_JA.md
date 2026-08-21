@@ -39,6 +39,7 @@ Plagiarism/
 │   ├── text_processor.py         # タイトル・要旨・キーワード抽出
 │   ├── similarity.py             # 類似度スコア計算
 │   ├── fingerprint.py            # Winnowing N-gram フィンガープリント
+│   ├── sources.py                # 検索ソース registry（UI と検索ループの単一情報源）
 │   └── searchers/
 │       ├── semantic_scholar.py   # Semantic Scholar API（IEEE/ACM 含む）
 │       ├── arxiv_searcher.py     # arXiv Atom API
@@ -248,15 +249,15 @@ streamlit run app.py
 4. キーなしの場合は CrossRef に自動フォールバック（結果は取得できますが件数は若干少なくなります）
 
 ### リスクしきい値のカスタマイズ
-`src/similarity.py` の `risk_level` プロパティを編集：
+`src/similarity.py` の `risk_tier` プロパティを編集：
 ```python
 @property
-def risk_level(self) -> str:
+def risk_tier(self) -> str:
     if self.combined_score >= 60:   # この値を変更
-        return "高風險"
+        return "high"
     if self.combined_score >= 35:   # この値を変更
-        return "中風險"
-    return "低風險"
+        return "medium"
+    return "low"
 ```
 
 ### N-gram フィンガープリントの感度調整

@@ -7,7 +7,9 @@ from typing import Generator
 BASE_URL = "http://export.arxiv.org/api/query"
 
 
-def search(query: str, max_results: int = 10) -> Generator[dict, None, None]:
+def search(query: str, max_results: int = 10, api_key: str = "") -> Generator[dict, None, None]:
+    # api_key is unused (arXiv needs none) but kept so every searcher shares
+    # one call signature for src/sources.py's uniform dispatch.
     params = {
         "search_query": f"all:{query}",
         "start": 0,

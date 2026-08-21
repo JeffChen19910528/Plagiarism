@@ -40,6 +40,7 @@ Plagiarism/
 │   ├── similarity.py             # TF-IDF 相似度計算
 │   ├── i18n.py                   # 多語系翻譯字典（繁中/英/日）
 │   ├── fingerprint.py            # Winnowing N-gram 指紋比對演算法
+│   ├── sources.py                # 搜尋來源註冊表（UI 與比對迴圈的單一資料來源）
 │   └── searchers/
 │       ├── semantic_scholar.py   # Semantic Scholar API（含 IEEE/ACM）
 │       ├── arxiv_searcher.py     # arXiv Atom API
@@ -48,7 +49,6 @@ Plagiarism/
 │       ├── google_scholar.py     # Google Scholar（scholarly 套件）
 │       └── springer_searcher.py  # Springer 期刊與書籍（API 或 CrossRef fallback）
 └── README.md / README_EN.md / README_JA.md
-└── README.md
 ```
 
 ---
@@ -255,16 +255,16 @@ streamlit run app.py
 
 ### 自訂風險門檻
 
-在 `src/similarity.py` 修改 `risk_level` 屬性中的數值：
+在 `src/similarity.py` 修改 `risk_tier` 屬性中的數值：
 
 ```python
 @property
-def risk_level(self) -> str:
+def risk_tier(self) -> str:
     if self.combined_score >= 60:   # 修改此值
-        return "高風險"
+        return "high"
     if self.combined_score >= 35:   # 修改此值
-        return "中風險"
-    return "低風險"
+        return "medium"
+    return "low"
 ```
 
 ### 調整 N-gram 指紋敏感度

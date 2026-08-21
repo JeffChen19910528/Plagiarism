@@ -7,7 +7,9 @@ BASE_URL = "https://api.crossref.org/works"
 MAILTO = "plagiarism-checker@example.com"  # CrossRef polite pool
 
 
-def search(query: str, max_results: int = 10) -> Generator[dict, None, None]:
+def search(query: str, max_results: int = 10, api_key: str = "") -> Generator[dict, None, None]:
+    # api_key is unused (CrossRef needs none) but kept so every searcher
+    # shares one call signature for src/sources.py's uniform dispatch.
     params = {
         "query": query,
         "rows": max_results,

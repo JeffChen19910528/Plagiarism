@@ -17,8 +17,12 @@ HEADERS = {
 }
 
 
-def search(query: str, max_results: int = 10) -> Generator[dict, None, None]:
-    """Yield thesis dicts from Taiwan NDLTD."""
+def search(query: str, max_results: int = 10, api_key: str = "") -> Generator[dict, None, None]:
+    """Yield thesis dicts from Taiwan NDLTD.
+
+    api_key is unused (NDLTD needs none) but kept so every searcher shares
+    one call signature for src/sources.py's uniform dispatch.
+    """
     try:
         from bs4 import BeautifulSoup
     except ImportError:

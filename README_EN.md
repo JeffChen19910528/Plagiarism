@@ -39,6 +39,7 @@ Plagiarism/
 │   ├── text_processor.py         # Title, abstract, keyword extraction
 │   ├── similarity.py             # Similarity scoring
 │   ├── fingerprint.py            # Winnowing N-gram fingerprint algorithm
+│   ├── sources.py                # Search source registry (single source of truth for the UI & search loop)
 │   └── searchers/
 │       ├── semantic_scholar.py   # Semantic Scholar API (incl. IEEE/ACM)
 │       ├── arxiv_searcher.py     # arXiv Atom API
@@ -250,15 +251,15 @@ User uploads PDF/DOCX
 4. Without a key, the tool automatically falls back to CrossRef (results still returned, but slightly fewer)
 
 ### Customize Risk Thresholds
-In `src/similarity.py`, edit the `risk_level` property:
+In `src/similarity.py`, edit the `risk_tier` property:
 ```python
 @property
-def risk_level(self) -> str:
+def risk_tier(self) -> str:
     if self.combined_score >= 60:   # change this
-        return "高風險"
+        return "high"
     if self.combined_score >= 35:   # change this
-        return "中風險"
-    return "低風險"
+        return "medium"
+    return "low"
 ```
 
 ### Tune N-gram Fingerprint Sensitivity
